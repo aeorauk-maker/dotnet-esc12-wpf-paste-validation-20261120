@@ -1,0 +1,48 @@
+name: ESC12 final archive clean acceptance
+on:
+  push:
+    paths:
+      - .github/workflows/esc12-final-acceptance.yml
+      - .github/workflows/esc12-final-poc.bin
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  matrix:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: 11.0.100
+      - name: Run controlled encrypted matrix
+        shell: pwsh
+        env:
+          ESC12_CARRIER_KEY: ${{ secrets.ESC12_CARRIER_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrEmpty($env:ESC12_CARRIER_KEY)) { throw 'Missing matrix key' }
+          $blob = [IO.File]::ReadAllBytes('.github/workflows/esc12-final-poc.bin')
+          if ($blob.Length -lt 29) { throw 'Invalid encrypted input' }
+          $nonce = [byte[]]::new(12)
+          $tag = [byte[]]::new(16)
+          $cipher = [byte[]]::new($blob.Length - 28)
+          [Array]::Copy($blob, 0, $nonce, 0, 12)
+          [Array]::Copy($blob, 12, $cipher, 0, $cipher.Length)
+          [Array]::Copy($blob, 12 + $cipher.Length, $tag, 0, 16)
+          $plain = [byte[]]::new($cipher.Length)
+          $key = [Convert]::FromBase64String($env:ESC12_CARRIER_KEY)
+          $aes = [Security.Cryptography.AesGcm]::new($key, 16)
+          try { $aes.Decrypt($nonce, $cipher, $tag, $plain, [Text.Encoding]::UTF8.GetBytes('ESC12-WPF-20261120')) }
+          finally { $aes.Dispose() }
+          $extract = Join-Path $env:RUNNER_TEMP 'esc12-controlled-matrix'
+          New-Item -ItemType Directory -Path $extract | Out-Null
+          $archive = Join-Path $env:RUNNER_TEMP 'esc12-input.zip'
+          [IO.File]::WriteAllBytes($archive, $plain)
+          $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne '9b012c84581092770851a079b30925d04c426d5b2345bbc800cf623191c34d2d') { throw 'Archive identity mismatch' }
+          Write-Output ('ESC12_ARCHIVE_SHA256=' + $actualHash)
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract
+          & (Join-Path $extract 'run.ps1')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

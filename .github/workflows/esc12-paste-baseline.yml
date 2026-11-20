@@ -33,6 +33,7 @@ jobs:
           '@ | Set-Content -LiteralPath WpfPasteBaseline/WpfPasteBaseline.csproj -Encoding utf8
           @'
           using System.Security.Cryptography;
+          using System.IO;
           using System.Text.Json;
           using System.Windows;
           using System.Windows.Controls;

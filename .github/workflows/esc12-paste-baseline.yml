@@ -1,0 +1,114 @@
+name: ESC12 stock WPF paste baselines
+on:
+  push:
+    paths:
+      - .github/workflows/esc12-paste-baseline.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  baseline:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: 11.0.100
+      - name: Run stock paste controls
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((dotnet --version).Trim() -ne '11.0.100') { throw 'Unexpected SDK version' }
+          New-Item -ItemType Directory -Path WpfPasteBaseline | Out-Null
+          @'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <OutputType>Exe</OutputType>
+              <TargetFramework>net11.0-windows</TargetFramework>
+              <UseWPF>true</UseWPF>
+              <Nullable>enable</Nullable>
+              <ImplicitUsings>enable</ImplicitUsings>
+            </PropertyGroup>
+          </Project>
+          '@ | Set-Content -LiteralPath WpfPasteBaseline/WpfPasteBaseline.csproj -Encoding utf8
+          @'
+          using System.Security.Cryptography;
+          using System.Text.Json;
+          using System.Windows;
+          using System.Windows.Controls;
+          using System.Windows.Documents;
+          
+          // Inert stock-paste controls.
+          internal static class Program
+          {
+              [STAThread]
+              private static int Main()
+              {
+                  var results = new List<object>();
+                  results.Add(RunCase("unicode_text", data => data.SetData(DataFormats.UnicodeText, "ESC12_VALID_TEXT"),
+                      text => text.Contains("ESC12_VALID_TEXT", StringComparison.Ordinal)));
+          
+                  results.Add(RunCase("valid_xaml_package", data =>
+                  {
+                      var source = new RichTextBox();
+                      source.Document.Blocks.Clear();
+                      source.Document.Blocks.Add(new Paragraph(new Run("ESC12_VALID_PACKAGE")));
+                      var range = new TextRange(source.Document.ContentStart, source.Document.ContentEnd);
+                      var stream = new MemoryStream();
+                      range.Save(stream, DataFormats.XamlPackage);
+                      stream.Position = 0;
+                      data.SetData(DataFormats.XamlPackage, stream);
+                  }, text => text.Contains("ESC12_VALID_PACKAGE", StringComparison.Ordinal)));
+          
+                  results.Add(RunCase("invalid_xaml_package", data =>
+                      data.SetData(DataFormats.XamlPackage, new MemoryStream(new byte[] { 0x45, 0x53, 0x43, 0x31, 0x32 })),
+                      text => !text.Contains("ESC12_", StringComparison.Ordinal)));
+          
+                  var module = typeof(RichTextBox).Assembly.Location;
+                  var output = new
+                  {
+                      runtime = Environment.Version.ToString(),
+                      module = module,
+                      moduleSha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(module))),
+                      results
+                  };
+                  Console.WriteLine(JsonSerializer.Serialize(output));
+                  return 0;
+              }
+          
+              private static object RunCase(string name, Action<DataObject> prepare, Func<string, bool> expected)
+              {
+                  var box = new RichTextBox();
+                  var window = new Window { Content = box, Width = 240, Height = 120,
+                      ShowInTaskbar = false, WindowStyle = WindowStyle.ToolWindow };
+                  string? error = null;
+                  string text = "";
+                  bool formatPresent = false;
+                  try
+                  {
+                      window.Show();
+                      var data = new DataObject();
+                      prepare(data);
+                      Clipboard.SetDataObject(data, copy: true);
+                      formatPresent = Clipboard.GetDataObject()?.GetFormats().Length > 0;
+                      box.Paste(); // TextBoxBase -> TextEditorCopyPaste.Paste -> stock format selection.
+                      text = new TextRange(box.Document.ContentStart, box.Document.ContentEnd).Text;
+                  }
+                  catch (Exception ex)
+                  {
+                      error = ex.GetType().FullName;
+                      text = new TextRange(box.Document.ContentStart, box.Document.ContentEnd).Text;
+                  }
+                  finally
+                  {
+                      window.Close();
+                      Clipboard.Clear();
+                  }
+          
+                  return new { name, formatPresent, passed = expected(text), textContainsValid =
+                      text.Contains("ESC12_VALID_", StringComparison.Ordinal), error };
+              }
+          }
+          '@ | Set-Content -LiteralPath WpfPasteBaseline/Program.cs -Encoding utf8
+          dotnet run --project WpfPasteBaseline/WpfPasteBaseline.csproj --configuration Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

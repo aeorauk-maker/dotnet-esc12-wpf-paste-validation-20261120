@@ -1,0 +1,19 @@
+name: ESC12 Windows startup control
+on:
+  push:
+    paths:
+      - .github/workflows/esc12-startup.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  startup:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Confirm hosted runner startup
+        shell: pwsh
+        run: |
+          Write-Output "ESC12_STARTUP_OK"
+          Write-Output "RunnerOS=$env:RUNNER_OS"
+          Write-Output "ImageOS=$env:ImageOS"

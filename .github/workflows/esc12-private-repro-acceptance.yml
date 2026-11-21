@@ -41,7 +41,7 @@ jobs:
           $archive = Join-Path $env:RUNNER_TEMP 'esc12-input.zip'
           [IO.File]::WriteAllBytes($archive, $plain)
           $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actualHash -ne '02b9dab9159afcbf6e6613268c5c30e04fc888c391da326043cbdcd68d75ec39') { throw 'Archive identity mismatch' }
+          if ($actualHash -ne '9d1832b824c853a4895ed0214cf9bb29e7cdc885ccb9d563801486bcad076400') { throw 'Archive identity mismatch' }
           Write-Output ('ESC12_ARCHIVE_SHA256=' + $actualHash)
           Expand-Archive -LiteralPath $archive -DestinationPath $extract
           try { $resultLines = & (Join-Path $extract 'run.ps1') }
